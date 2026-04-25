@@ -1,0 +1,16 @@
+.git/
+.github/
+.venv/
+node_modules/
+frontend/
+datasets/
+reports/
+*.pyc
+__pycache__/
+.DS_Store
+.env
+axiom-sa-key.json
+*.md
+deploy.sh
+firebase.json
+.firebaserc

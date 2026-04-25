@@ -1,0 +1,33 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/axiom-backend:latest
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/axiom-backend:latest"]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - axiom-backend
+      - --image=us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/axiom-backend:latest
+      - --region=us-central1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=2Gi
+      - --cpu=2
+      - --timeout=600
+      - --max-instances=10
+      - --concurrency=40
+      - --set-env-vars=GEMINI_MODEL=gemini-3.1-pro-preview,GEMINI_THINKING_LEVEL=HIGH,GOOGLE_GENAI_USE_VERTEXAI=True,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=global,FIREBASE_PROJECT_ID=$PROJECT_ID,FIREBASE_DATABASE_URL=https://$PROJECT_ID-default-rtdb.firebaseio.com,AXIOM_DISABLE_FIRESTORE=0,AXIOM_DISABLE_STORAGE=1,CORS_ORIGINS=https://$PROJECT_ID.web.app,https://$PROJECT_ID.firebaseapp.com,http://localhost:3000
+
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/axiom-backend:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

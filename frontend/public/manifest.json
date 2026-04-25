@@ -1,0 +1,12 @@
+{
+  "short_name": "Axiom",
+  "name": "Axiom — Algorithmic Conscience Engine",
+  "description": "Causal fairness firewall for production AI",
+  "start_url": "./",
+  "display": "standalone",
+  "theme_color": "#1A73E8",
+  "background_color": "#FFFFFF",
+  "icons": [
+    { "src": "axiom-mark.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" }
+  ]
+}

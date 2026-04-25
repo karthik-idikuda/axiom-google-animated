@@ -1,0 +1,1 @@
+{"hosting":{"site":"gen-lang-client-0976545577","public":"frontend/build","ignore":["firebase.json","**/.*"],"headers":[{"source":"/axiom-logo.png","headers":[{"key":"Cache-Control","value":"no-store"}]}],"rewrites":[{"source":"**","destination":"/index.html"}]}}

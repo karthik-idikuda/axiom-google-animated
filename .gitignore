@@ -1,0 +1,13 @@
+.env
+axiom-sa-key.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+build/
+dist/
+.DS_Store
+*.log
+datasets/*.csv
+!datasets/.gitkeep
