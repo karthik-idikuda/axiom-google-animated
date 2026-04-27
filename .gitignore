@@ -12,3 +12,7 @@ dist/
 datasets/*.csv
 !datasets/.gitkeep
 reports/*.pdf
+.gcloud_config/
+.gcloud_tmp/
+.firebase/
+*.pid
