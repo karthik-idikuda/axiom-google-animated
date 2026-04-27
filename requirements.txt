@@ -1,5 +1,5 @@
 # ── LangGraph Orchestration (CORE PIPELINE) ──────────────────────────────────
-langgraph==0.2.73
+langgraph==1.0.10rc1
 # langchain + langchain-core are transitive deps of langgraph — don't pin them
 # langchain-google-vertexai only needed if GOOGLE_GENAI_USE_VERTEXAI=True
 
@@ -17,8 +17,8 @@ fairlearn>=0.11.0
 # ── Backend API ───────────────────────────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
-python-multipart==0.0.9
-python-dotenv==1.0.1
+python-multipart==0.0.26
+python-dotenv==1.2.2
 
 # ── Google Cloud ──────────────────────────────────────────────────────────────
 google-genai>=1.51.0
