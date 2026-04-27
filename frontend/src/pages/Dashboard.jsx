@@ -14,38 +14,6 @@ const SEVERITY_LABELS = {
   25: "Low",
 };
 
-// Sample data for demo/preview
-const SAMPLE_DRIFT_DATA = [
-  { batch: "1", score: 72 },
-  { batch: "2", score: 75 },
-  { batch: "3", score: 78 },
-  { batch: "4", score: 82 },
-  { batch: "5", score: 85 },
-  { batch: "6", score: 87 },
-  { batch: "7", score: 84 },
-  { batch: "8", score: 88 },
-];
-
-const SAMPLE_DECISIONS = [
-  { session_id: "d3a7f291", timestamp: new Date(Date.now() - 120000), verdict: "PASS", severity_score: 15, violated_rule_id: "-", remediated_decision: false },
-  { session_id: "c5b2e4f8", timestamp: new Date(Date.now() - 240000), verdict: "FAIL", severity_score: 65, violated_rule_id: "RULE_2", remediated_decision: true },
-  { session_id: "a9c1d7e3", timestamp: new Date(Date.now() - 360000), verdict: "PASS", severity_score: 22, violated_rule_id: "-", remediated_decision: false },
-  { session_id: "b4f8a2d1", timestamp: new Date(Date.now() - 480000), verdict: "FAIL", severity_score: 88, violated_rule_id: "RULE_1", remediated_decision: true },
-  { session_id: "e7g2c9f5", timestamp: new Date(Date.now() - 600000), verdict: "PASS", severity_score: 18, violated_rule_id: "-", remediated_decision: false },
-];
-
-const SAMPLE_GRAPH_DATA = {
-  causal_graph: [
-    { source: "age", target: "hiring", weight: 0.3 },
-    { source: "gender", target: "hiring", weight: 0.8 },
-    { source: "experience", target: "hiring", weight: 0.95 },
-    { source: "experience", target: "salary", weight: 0.7 },
-    { source: "gender", target: "salary", weight: 0.4 },
-    { source: "education", target: "salary", weight: 0.6 },
-  ],
-  protected_attributes: ["gender", "age"],
-};
-
 function formatTimeAgo(timestamp) {
   if (!timestamp) return "—";
   const seconds = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -58,7 +26,6 @@ function formatTimeAgo(timestamp) {
 
 function StatCard({ label, value, icon, tone, sublabel, delay = 0 }) {
   const accentMap = { blue: "#1A73E8", red: "#C5221F", yellow: "#B06000", green: "#137333" };
-  const numValue = typeof value === 'number' ? value : parseFloat(value) || 0;
   return (
     <div className={`stat-card ${tone || 'blue'}`} style={{ position: 'relative', animation: `cardEnter 0.5s cubic-bezier(0.4,0,0.2,1) ${delay}s both` }}>
       <div className="stat-label">
@@ -100,6 +67,7 @@ function DecisionRow({ decision, index }) {
   const r = decision.raw || decision;
   const verdict = r.verdict || "—";
   const isFail = verdict === "FAIL";
+  const reportId = r.session_id || r.uuid || "";
   
   return (
     <tr className="table-row-anim" style={{
@@ -107,13 +75,17 @@ function DecisionRow({ decision, index }) {
       animation: `rowEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) ${index * 0.03}s both`,
     }}>
       <td style={{ padding: "16px 20px", fontFamily: "monospace", fontSize: 12, color: "#1A73E8" }}>
-        <Link to={`/report/${r.session_id || r.uuid || index}`} style={{
-          color: "#1A73E8",
-          textDecoration: "none",
-          transition: "opacity 0.15s",
-        }}>
-          {String(r.session_id || r.uuid || index).slice(0, 8)}…
-        </Link>
+        {reportId ? (
+          <Link to={`/report/${reportId}`} style={{
+            color: "#1A73E8",
+            textDecoration: "none",
+            transition: "opacity 0.15s",
+          }}>
+            {String(reportId).slice(0, 8)}…
+          </Link>
+        ) : (
+          <span style={{ color: "#9E9E9E" }}>—</span>
+        )}
       </td>
       <td style={{ padding: "16px 20px", fontSize: 13, color: "#5F6368" }}>
         {formatTimeAgo(r.timestamp)}
@@ -194,38 +166,95 @@ export default function Dashboard() {
       setMetrics(null);
       return;
     }
+    let lastGraphSig = "";
+    let lastDecisionsSig = "";
+    let lastMetricsSig = "";
     const load = () => {
-      // Start with sample data as default
-      setGraph(SAMPLE_GRAPH_DATA);
-      setDecisions(SAMPLE_DECISIONS);
-      setMetrics({ total_decisions: SAMPLE_DECISIONS.length, flagged: 1, remediated: 2, average_fairness_score: 82, drift_data: SAMPLE_DRIFT_DATA });
-      
-      // Fetch real data and override only if meaningful data exists
+      // REAL DATA ONLY - No fake/sample data
+      // Fetch causal graph from Firebase
       getCausalGraph(projectId).then((r) => {
         const g = r.data;
-        if (g && g.causal_graph && g.causal_graph.length > 0) setGraph(g);
-      }).catch(() => {});
+        if (g && g.causal_graph) {
+          const sig = JSON.stringify({
+            edges: g.causal_graph,
+            protected: g.protected_attributes || [],
+            matrixRows: (g.adjacency_matrix || []).length,
+          });
+          if (sig !== lastGraphSig) {
+            lastGraphSig = sig;
+            setGraph(g);
+          }
+        } else {
+          if (lastGraphSig !== "") {
+            lastGraphSig = "";
+            setGraph({ causal_graph: [], protected_attributes: [] });
+          }
+        }
+      }).catch((err) => {
+        console.warn("getCausalGraph failed:", err);
+        if (lastGraphSig !== "") {
+          lastGraphSig = "";
+          setGraph({ causal_graph: [], protected_attributes: [] });
+        }
+      });
       
+      // Fetch real decisions from Firebase
       getDecisions(projectId).then((r) => {
         const d = r.data;
         const list = Array.isArray(d) ? d
                   : Array.isArray(d?.decisions) ? d.decisions
                   : (d && typeof d === "object") ? Object.values(d) : [];
-        if (list.length > 0) setDecisions(list);
-      }).catch(() => {});
+        const sig = JSON.stringify(
+          list.map((x) => ({
+            id: x?.session_id || x?.uuid || x?._id || x?.raw?.session_id || "",
+            t: x?.timestamp || x?.raw?.timestamp || "",
+            v: x?.verdict || x?.raw?.verdict || "",
+            s: x?.severity_score || x?.raw?.severity_score || null,
+          }))
+        );
+        if (sig !== lastDecisionsSig) {
+          lastDecisionsSig = sig;
+          setDecisions(list);
+        }
+      }).catch((err) => {
+        console.warn("getDecisions failed:", err);
+        if (lastDecisionsSig !== "") {
+          lastDecisionsSig = "";
+          setDecisions([]);
+        }
+      });
       
+      // Fetch real metrics from Firebase
       getMetrics(projectId).then((r) => {
         const m = r.data;
         if (m && typeof m === "object") {
-          const hasRealData = (m.total_decisions > 0) || (m.flagged > 0) || (m.remediated > 0) || (m.average_fairness_score > 0);
-          if (hasRealData || (m.drift_data && m.drift_data.length > 0)) {
+          const sig = JSON.stringify({
+            total: m.total_decisions,
+            flagged: m.flagged,
+            remediated: m.remediated,
+            avg: m.average_fairness_score,
+            drift: m.drift_data || [],
+          });
+          if (sig !== lastMetricsSig) {
+            lastMetricsSig = sig;
             setMetrics(m);
           }
+        } else {
+          if (lastMetricsSig !== "empty") {
+            lastMetricsSig = "empty";
+            setMetrics({ total_decisions: 0, flagged: 0, remediated: 0, average_fairness_score: 0, drift_data: [] });
+          }
         }
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("getMetrics failed:", err);
+        if (lastMetricsSig !== "empty") {
+          lastMetricsSig = "empty";
+          setMetrics({ total_decisions: 0, flagged: 0, remediated: 0, average_fairness_score: 0, drift_data: [] });
+        }
+      });
     };
     load();
-    const id = setInterval(load, 5000);
+    const id = setInterval(load, 15000);
     return () => clearInterval(id);
   }, [projectId]);
 

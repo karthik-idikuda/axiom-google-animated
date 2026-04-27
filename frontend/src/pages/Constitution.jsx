@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Panel from "../components/Panel";
-import RulesGraph from "../components/RulesGraph";
-import { saveConstitution, getConstitution } from "../api";
+import CausalGraph from "../components/CausalGraph";
+import { saveConstitution, getConstitution, getCausalGraph } from "../api";
 import { useProjectId } from "../projectStore";
 
 const PLACEHOLDER =
@@ -50,6 +50,7 @@ export default function Constitution() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [savedAt, setSavedAt] = useState(null);
+  const [graph, setGraph] = useState({ causal_graph: [], protected_attributes: [] });
 
   useEffect(() => {
     if (!projectId) { setText(""); setParsed([]); return; }
@@ -57,6 +58,45 @@ export default function Constitution() {
       setText(r.data?.rules_text || "");
       setParsed(r.data?.parsed || r.data?.parsed_rules || []);
     }).catch(() => { setText(""); setParsed([]); });
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setGraph({ causal_graph: [], protected_attributes: [] });
+      return;
+    }
+    let lastGraphSig = "";
+    const loadGraph = () => {
+      getCausalGraph(projectId)
+        .then((r) => {
+          const g = r.data;
+          if (g && Array.isArray(g.causal_graph) && g.causal_graph.length > 0) {
+            const sig = JSON.stringify({
+              edges: g.causal_graph,
+              protected: g.protected_attributes || [],
+              matrixRows: (g.adjacency_matrix || []).length,
+            });
+            if (sig !== lastGraphSig) {
+              lastGraphSig = sig;
+              setGraph(g);
+            }
+          } else {
+            if (lastGraphSig !== "") {
+              lastGraphSig = "";
+              setGraph({ causal_graph: [], protected_attributes: [] });
+            }
+          }
+        })
+        .catch(() => {
+          if (lastGraphSig !== "") {
+            lastGraphSig = "";
+            setGraph({ causal_graph: [], protected_attributes: [] });
+          }
+        });
+    };
+    loadGraph();
+    const id = setInterval(loadGraph, 20000);
+    return () => clearInterval(id);
   }, [projectId]);
 
   const save = async () => {
@@ -135,9 +175,10 @@ export default function Constitution() {
         {/* Enforced Rules Visualization */}
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <Panel title="Causal Logic Graph" icon="account_tree">
-            <div style={{ height: 320, background: "var(--bg-secondary)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-              <RulesGraph rules={parsed} />
-            </div>
+            <CausalGraph
+              edges={graph.causal_graph || []}
+              protected={graph.protected_attributes || []}
+            />
           </Panel>
 
           <Panel title={`Enforced Rules (${parsed.length})`} icon="gavel">

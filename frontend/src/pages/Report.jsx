@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Panel from "../components/Panel";
 import { getReport } from "../api";
+import config from "../config";
 
 function ScoreGauge({ label, value, delayClass }) {
   const score = typeof value === "number" ? Math.round(value) : null;
@@ -106,6 +107,11 @@ export default function Report() {
   const counterfactuals = report.counterfactuals || [];
   const recommendation = report.remediation_recommendation || {};
   const actions = recommendation.actions || [];
+  const resolvedPdfUrl = report.pdf_url
+    ? (report.pdf_url.startsWith("http")
+      ? report.pdf_url
+      : `${config.API_BASE_URL}${report.pdf_url}`)
+    : "";
 
   return (
     <div className="main anim-fade">
@@ -206,8 +212,8 @@ export default function Report() {
                 </div>
               </div>
               
-              {report.pdf_url && (
-                <a href={report.pdf_url} target="_blank" rel="noreferrer" className="btn-google" style={{ justifyContent: "center" }}>
+              {resolvedPdfUrl && (
+                <a href={resolvedPdfUrl} target="_blank" rel="noreferrer" className="btn-google" style={{ justifyContent: "center" }}>
                   <span className="material-symbols-rounded">picture_as_pdf</span>
                   Download Official Report
                 </a>
