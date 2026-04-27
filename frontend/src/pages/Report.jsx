@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Panel from "../components/Panel";
-import { getReport } from "../api";
+import { getReport, getDecisions } from "../api";
 import config from "../config";
+import { useProjectId } from "../projectStore";
 
 function ScoreGauge({ label, value, delayClass }) {
   const score = typeof value === "number" ? Math.round(value) : null;
@@ -65,13 +66,55 @@ function EvidenceCard({ item, index }) {
 
 export default function Report() {
   const { sessionId } = useParams();
+  const [projectId] = useProjectId();
   const [report, setReport] = useState(null);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
-    getReport(sessionId).then((r) => setReport(r.data))
-      .catch((e) => setErr(e.response?.data?.detail || e.message));
-  }, [sessionId]);
+    let cancelled = false;
+    const load = async () => {
+      setErr(null);
+      setReport(null);
+      try {
+        const r = await getReport(sessionId);
+        if (!cancelled) setReport(r.data);
+        return;
+      } catch (e) {
+        // Fallback: recover from decision log if report doc is missing/unavailable.
+        if (!projectId) {
+          if (!cancelled) setErr(e.response?.data?.detail || e.message);
+          return;
+        }
+        try {
+          const listRes = await getDecisions(projectId);
+          const list = Array.isArray(listRes.data)
+            ? listRes.data
+            : Array.isArray(listRes.data?.decisions) ? listRes.data.decisions : [];
+          const matched = list.find((d) => {
+            const raw = d?.raw || d;
+            return (raw?.session_id || raw?.uuid || d?._id) === sessionId;
+          });
+          if (matched && !cancelled) {
+            const raw = matched?.raw || matched;
+            setReport({
+              ...raw,
+              session_id: raw?.session_id || sessionId,
+              audit_report: raw?.audit_report || "Recovered from live decision log.",
+              bias_evidence: raw?.bias_evidence || [],
+              counterfactuals: raw?.counterfactuals || [],
+              remediation_recommendation: raw?.remediation_recommendation || { actions: [] },
+            });
+            return;
+          }
+          if (!cancelled) setErr(e.response?.data?.detail || e.message);
+        } catch {
+          if (!cancelled) setErr(e.response?.data?.detail || e.message);
+        }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [sessionId, projectId]);
 
   if (err) {
     return (

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Panel from "../components/Panel";
 import CausalGraph from "../components/CausalGraph";
-import { uploadDataset, saveConstitution, batchAudit } from "../api";
+import { uploadDataset, saveConstitution, batchAudit, getCausalGraph, getDecisions } from "../api";
 import { useProjectId } from "../projectStore";
 
 const SAMPLES = [
@@ -84,6 +84,28 @@ export default function Upload() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
+  const buildEdgesFromDecisions = (decisions) => {
+    const list = Array.isArray(decisions) ? decisions : [];
+    const edgeMap = new Map();
+    const protectedSet = new Set();
+    list.forEach((item) => {
+      const rec = item?.raw || item || {};
+      const evidence = Array.isArray(rec.bias_evidence) ? rec.bias_evidence : [];
+      evidence.forEach((ev) => {
+        const src = String(ev?.protected_attribute || "").trim();
+        const dst = String(ev?.outcome_column || "").trim();
+        if (!src || !dst) return;
+        protectedSet.add(src);
+        const key = `${src}=>${dst}`;
+        edgeMap.set(key, { source: src, target: dst, weight: 1 });
+      });
+    });
+    return {
+      edges: Array.from(edgeMap.values()),
+      protectedAttributes: Array.from(protectedSet),
+    };
+  };
+
   const analyzeSample = async (sample) => {
     setBusy(true); setError(null); setResult(null);
     try {
@@ -93,9 +115,22 @@ export default function Upload() {
       const csvFile = new File([blob], `${sample.id}.csv`, { type: "text/csv" });
       
       const uploadRes = await uploadDataset(sample.id, csvFile);
+      const graphRes = await getCausalGraph(sample.id).catch(() => ({ data: {} }));
+      let fallbackGraph = { edges: [], protectedAttributes: [] };
+      if (!Array.isArray(graphRes.data?.causal_graph) || graphRes.data.causal_graph.length === 0) {
+        const decRes = await getDecisions(sample.id).catch(() => ({ data: { decisions: [] } }));
+        const decList = Array.isArray(decRes.data)
+          ? decRes.data
+          : Array.isArray(decRes.data?.decisions) ? decRes.data.decisions : [];
+        fallbackGraph = buildEdgesFromDecisions(decList);
+      }
       
       // Show results immediately so UI doesn't hang!
-      setResult(uploadRes.data);
+      setResult({
+        ...uploadRes.data,
+        causal_graph_edges: (graphRes.data?.causal_graph || fallbackGraph.edges),
+        protected_attributes: (uploadRes.data?.protected_attributes?.length ? uploadRes.data.protected_attributes : fallbackGraph.protectedAttributes),
+      });
       setBusy(false);
 
       // Inject constitution and batch audit in the background
@@ -114,7 +149,20 @@ export default function Upload() {
     setBusy(true); setError(null); setResult(null);
     try {
       const r = await uploadDataset(projectId, file);
-      setResult(r.data);
+      const graphRes = await getCausalGraph(projectId).catch(() => ({ data: {} }));
+      let fallbackGraph = { edges: [], protectedAttributes: [] };
+      if (!Array.isArray(graphRes.data?.causal_graph) || graphRes.data.causal_graph.length === 0) {
+        const decRes = await getDecisions(projectId).catch(() => ({ data: { decisions: [] } }));
+        const decList = Array.isArray(decRes.data)
+          ? decRes.data
+          : Array.isArray(decRes.data?.decisions) ? decRes.data.decisions : [];
+        fallbackGraph = buildEdgesFromDecisions(decList);
+      }
+      setResult({
+        ...r.data,
+        causal_graph_edges: (graphRes.data?.causal_graph || fallbackGraph.edges),
+        protected_attributes: (r.data?.protected_attributes?.length ? r.data.protected_attributes : fallbackGraph.protectedAttributes),
+      });
     } catch (e) {
       setError(e.response?.data?.detail || e.message);
     } finally { setBusy(false); }
@@ -203,12 +251,11 @@ export default function Upload() {
         {/* Right Column: Discovery Results */}
         <Panel title="Discovery Results" icon="insights">
           {!result && !busy && (
-            <div className="empty-state">
-              <span className="material-symbols-rounded" style={{ fontSize: 48, color: "var(--border)", display: "block", marginBottom: 16 }}>
-                travel_explore
-              </span>
-              <div style={{ fontWeight: 500, fontSize: 16, color: "var(--text-primary)", marginBottom: 8 }}>Ready for analysis</div>
-              <div className="empty-state-desc">Select a dataset and run the discovery engine to see causal nodes and protected pathways.</div>
+            <div className="anim-fade">
+              <CausalGraph edges={[]} protected={[]} animated />
+              <div className="empty-state-desc" style={{ marginTop: 14 }}>
+                Select a dataset and run discovery to populate this graph from real data.
+              </div>
             </div>
           )}
 
@@ -255,6 +302,7 @@ export default function Upload() {
                 <CausalGraph 
                   edges={result.causal_graph_edges || []} 
                   protected={result.protected_attributes || []} 
+                  animated
                 />
               </div>
 

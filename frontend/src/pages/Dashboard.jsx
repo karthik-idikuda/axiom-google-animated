@@ -67,7 +67,7 @@ function DecisionRow({ decision, index }) {
   const r = decision.raw || decision;
   const verdict = r.verdict || "—";
   const isFail = verdict === "FAIL";
-  const reportId = r.session_id || r.uuid || "";
+  const reportId = r.session_id || r.uuid || r._id || "";
   
   return (
     <tr className="table-row-anim" style={{
@@ -192,10 +192,53 @@ export default function Dashboard() {
         }
       }).catch((err) => {
         console.warn("getCausalGraph failed:", err);
-        if (lastGraphSig !== "") {
-          lastGraphSig = "";
-          setGraph({ causal_graph: [], protected_attributes: [] });
-        }
+        // Fallback: build a simple live graph from decision evidence.
+        getDecisions(projectId).then((res) => {
+          const list = Array.isArray(res.data) ? res.data
+            : Array.isArray(res.data?.decisions) ? res.data.decisions : [];
+          const edgeMap = new Map();
+          const protectedSet = new Set();
+          list.forEach((item) => {
+            const rec = item?.raw || item || {};
+            const evidence = Array.isArray(rec.bias_evidence) ? rec.bias_evidence : [];
+            evidence.forEach((ev) => {
+              const src = String(ev?.protected_attribute || "").trim();
+              const dst = String(ev?.outcome_column || "").trim();
+              if (!src || !dst) return;
+              protectedSet.add(src);
+              edgeMap.set(`${src}=>${dst}`, { source: src, target: dst, weight: 1 });
+            });
+          });
+          const causalEdges = Array.from(edgeMap.values());
+          const featureNames = Array.from(
+            new Set(
+              causalEdges.flatMap((e) => [String(e.source), String(e.target)])
+            )
+          );
+          const idx = new Map(featureNames.map((n, i) => [n, i]));
+          const adjacencyMatrix = featureNames.map(() => featureNames.map(() => 0));
+          causalEdges.forEach((e) => {
+            const r = idx.get(String(e.source));
+            const c = idx.get(String(e.target));
+            if (r !== undefined && c !== undefined) adjacencyMatrix[r][c] = 1;
+          });
+          const fallback = {
+            causal_graph: causalEdges,
+            protected_attributes: Array.from(protectedSet),
+            feature_names: featureNames,
+            adjacency_matrix: adjacencyMatrix,
+          };
+          const sig = JSON.stringify(fallback);
+          if (sig !== lastGraphSig) {
+            lastGraphSig = sig;
+            setGraph(fallback);
+          }
+        }).catch(() => {
+          if (lastGraphSig !== "") {
+            lastGraphSig = "";
+            setGraph({ causal_graph: [], protected_attributes: [] });
+          }
+        });
       });
       
       // Fetch real decisions from Firebase
@@ -515,7 +558,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <>
-              <CausalGraph edges={graph.causal_graph || []} protected={graph.protected_attributes || []} />
+              <CausalGraph edges={graph.causal_graph || []} protected={graph.protected_attributes || []} animated />
               <ProtectedBadge attributes={graph.protected_attributes} />
               
               <button onClick={() => setShowMatrix(!showMatrix)} style={{

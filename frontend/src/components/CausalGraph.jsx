@@ -1,12 +1,21 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 
-export default function CausalGraph({ edges = [], protected: protectedAttrs = [] }) {
+export default function CausalGraph({ edges = [], protected: protectedAttrs = [], animated = false }) {
   const fgRef = useRef();
   const [size, setSize] = useState({ w: 600, h: 500 });
   const containerRef = useRef();
-  const startRef = useRef(Date.now());
-  const [hoveredNode, setHoveredNode] = useState(null);
+  const hoveredNodeRef = useRef(null);
+  const pinnedForHashRef = useRef("");
+
+  const seedFromId = (id) => {
+    let h = 0;
+    const s = String(id || "");
+    for (let i = 0; i < s.length; i += 1) {
+      h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return h;
+  };
 
   useEffect(() => {
     const measure = () => {
@@ -24,7 +33,7 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
 
   const edgesHash = JSON.stringify(edges);
   useEffect(() => {
-    startRef.current = Date.now();
+    pinnedForHashRef.current = "";
     try { fgRef.current?.d3ReheatSimulation?.(); } catch (e) {}
   }, [edgesHash]);
 
@@ -33,13 +42,33 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
       fgRef.current.d3Force('charge').strength(-500);
       fgRef.current.d3Force('link').distance(150);
       if (fgRef.current.d3Force('center')) {
-        fgRef.current.d3Force('center').strength(0.05);
+        fgRef.current.d3Force('center').strength(animated ? 0.08 : 0.05);
       }
       if (fgRef.current.d3Force('collide')) {
         fgRef.current.d3Force('collide').radius(70);
       }
     }
-  }, [edgesHash]);
+  }, [edgesHash, animated]);
+
+  const graphData = useMemo(() => {
+    const nodeSet = new Set();
+    edges.forEach((e) => { nodeSet.add(e.source); nodeSet.add(e.target); });
+    const nodes = Array.from(nodeSet).map((id) => ({
+      id,
+      isProtected: protectedAttrs.includes(id),
+      // Deterministic initial coordinates so layout style stays consistent
+      // between Discovery Results and Causal Logic Graph.
+      x: ((seedFromId(id) % 1000) / 1000 - 0.5) * 800,
+      y: ((seedFromId(`${id}-y`) % 1000) / 1000 - 0.5) * 500,
+    }));
+    const links = edges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      weight: e.weight,
+      biased: protectedAttrs.includes(e.source),
+    }));
+    return { nodes, links };
+  }, [edges, protectedAttrs]);
 
   if (!edges.length) {
     return (
@@ -51,19 +80,6 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
     );
   }
 
-  const nodeSet = new Set();
-  edges.forEach((e) => { nodeSet.add(e.source); nodeSet.add(e.target); });
-  const nodes = Array.from(nodeSet).map((id) => ({
-    id,
-    isProtected: protectedAttrs.includes(id),
-  }));
-  const links = edges.map((e) => ({
-    source: e.source,
-    target: e.target,
-    weight: e.weight,
-    biased: protectedAttrs.includes(e.source),
-  }));
-
   return (
     <div ref={containerRef} style={{ width: "100%", background: "#FFFFFF", padding: 0 }}>
       {/* Graph canvas */}
@@ -74,20 +90,40 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
       }}>
         <ForceGraph2D
           ref={fgRef}
-          graphData={{ nodes, links }}
+          graphData={graphData}
           width={size.w}
           height={size.h}
           backgroundColor="#FAFBFC"
-          onNodeHover={n => setHoveredNode(n?.id || null)}
+          enableNodeDrag={false}
+          onNodeHover={(n) => { hoveredNodeRef.current = n?.id || null; }}
           linkCurvature={0.25}
-          linkDirectionalParticles={0}
-          linkDirectionalParticleSpeed={0}
+          linkDirectionalParticles={animated ? 2 : 0}
+          linkDirectionalParticleSpeed={animated ? 0.004 : 0}
           linkDirectionalParticleWidth={4}
           linkDirectionalParticleColor={l => l.biased ? "#EA4335" : "#4285F4"}
-          cooldownTicks={160}
+          warmupTicks={animated ? 120 : 80}
+          cooldownTicks={animated ? 100000 : 80}
+          d3VelocityDecay={0.65}
+          onEngineStop={() => {
+            if (animated) return;
+            // Freeze layout once settled to fully stop drift/jitter.
+            if (pinnedForHashRef.current === edgesHash) return;
+            try {
+              const gd = fgRef.current?.graphData?.();
+              if (gd?.nodes?.length) {
+                gd.nodes.forEach((n) => {
+                  n.fx = n.x;
+                  n.fy = n.y;
+                });
+                fgRef.current?.d3Force("center")?.strength(0);
+                fgRef.current?.refresh?.();
+                pinnedForHashRef.current = edgesHash;
+              }
+            } catch (e) {}
+          }}
           nodeCanvasObjectMode={() => "replace"}
           nodeCanvasObject={(n, ctx, scale) => {
-            const isHovered = hoveredNode === n.id;
+            const isHovered = hoveredNodeRef.current === n.id;
             
             const size = n.isProtected ? 20 : 15;
             const h = size * 0.5; 

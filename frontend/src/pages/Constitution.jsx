@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Panel from "../components/Panel";
 import CausalGraph from "../components/CausalGraph";
 import { saveConstitution, getConstitution, getCausalGraph } from "../api";
@@ -115,6 +115,41 @@ export default function Constitution() {
     } finally { setBusy(false); }
   };
 
+  const policyGraph = useMemo(() => {
+    const cleanedRules = Array.isArray(parsed) ? parsed : [];
+    const edges = [];
+    const protectedSet = new Set();
+    const lineFallback = (text || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const inferOutcome = (ruleText) => {
+      const t = String(ruleText || "");
+      const fromOn = t.match(/influence on ([a-z0-9 _-]+)/i);
+      if (fromOn?.[1]) return fromOn[1].trim();
+      const fromAffect = t.match(/affect ([a-z0-9 _-]+)/i);
+      if (fromAffect?.[1]) return fromAffect[1].trim();
+      return "outcome";
+    };
+
+    cleanedRules.forEach((rule, idx) => {
+      const protectedAttr = String(rule?.protected_attribute || `protected_${idx + 1}`).toLowerCase();
+      const ruleNode = String(rule?.rule_id || `rule_${idx + 1}`).toLowerCase();
+      const ruleText = rule?.description || rule?.text || lineFallback[idx] || "";
+      const outcomeNode = inferOutcome(ruleText).toLowerCase().replace(/\s+/g, "_");
+      protectedSet.add(protectedAttr);
+
+      edges.push({ source: protectedAttr, target: ruleNode, weight: 1 });
+      edges.push({ source: ruleNode, target: outcomeNode, weight: 1 });
+    });
+
+    return {
+      edges,
+      protectedAttributes: Array.from(protectedSet),
+    };
+  }, [parsed, text]);
+
   return (
     <div className="main anim-fade">
       <header className="page-header">
@@ -176,8 +211,9 @@ export default function Constitution() {
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <Panel title="Causal Logic Graph" icon="account_tree">
             <CausalGraph
-              edges={graph.causal_graph || []}
-              protected={graph.protected_attributes || []}
+              edges={policyGraph.edges.length ? policyGraph.edges : (graph.causal_graph || [])}
+              protected={policyGraph.edges.length ? policyGraph.protectedAttributes : (graph.protected_attributes || [])}
+              animated={policyGraph.edges.length > 0}
             />
           </Panel>
 

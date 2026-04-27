@@ -134,8 +134,12 @@ def _fs_set(collection: str, doc_id: str, data: dict, merge: bool = False) -> No
 def _fs_get(collection: str, doc_id: str) -> Optional[dict]:
     _init()
     if _fs is not None:
-        snap = _fs.collection(collection).document(doc_id).get()
-        return snap.to_dict() if snap.exists else None
+        try:
+            snap = _fs.collection(collection).document(doc_id).get()
+            return snap.to_dict() if snap.exists else None
+        except Exception as e:
+            # If Firestore access is misconfigured/denied, degrade gracefully to RTDB fallback.
+            log.warning("Firestore read failed for %s/%s, using RTDB fallback: %s", collection, doc_id, e)
     return db.reference(f"/firestore_fallback/{collection}/{doc_id}").get()
 
 
@@ -184,6 +188,12 @@ def write_report(session_id: str, data: dict) -> None:
 
 def read_report(session_id: str) -> Optional[dict]:
     return _fs_get("audit_reports", session_id)
+
+
+def read_decision(session_id: str) -> Optional[dict]:
+    _init()
+    rec = db.reference(f"/decisions/{session_id}").get()
+    return rec if isinstance(rec, dict) else None
 
 
 def write_constitution(project_id: str, rules_text: str, parsed: list) -> None:

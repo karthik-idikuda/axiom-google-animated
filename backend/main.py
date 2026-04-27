@@ -275,10 +275,30 @@ def get_constitution(project_id: str):
 
 @app.get("/api/v1/report/{session_id}")
 def get_report(session_id: str):
-    doc = firebase_service.read_report(session_id)
-    if not doc:
-        raise HTTPException(404, "Report not found")
-    return doc
+    try:
+        doc = firebase_service.read_report(session_id)
+    except Exception as e:
+        log.warning("read_report failed for %s, falling back to decision: %s", session_id, e)
+        doc = None
+    if doc:
+        return doc
+
+    # Fallback: if a standalone audit report doc is missing, return
+    # the decision snapshot so report page still renders instead of 404.
+    decision = firebase_service.read_decision(session_id)
+    if decision:
+        safe = firebase_service._json_safe(dict(decision))
+        safe.setdefault("session_id", session_id)
+        safe.setdefault("audit_report", "Report snapshot loaded from decision log.")
+        safe.setdefault("bias_evidence", safe.get("bias_evidence") or [])
+        safe.setdefault("counterfactuals", safe.get("counterfactuals") or [])
+        safe.setdefault(
+            "remediation_recommendation",
+            safe.get("remediation_recommendation") or {"actions": []},
+        )
+        return safe
+
+    raise HTTPException(404, "Report not found")
 
 
 @app.get("/api/v1/metrics/{project_id}")
