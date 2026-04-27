@@ -17,17 +17,8 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
     };
     measure();
     window.addEventListener("resize", measure);
-    
-    // Animation loop to keep canvas alive for orbiters
-    let animationFrameId;
-    const loop = () => {
-      animationFrameId = requestAnimationFrame(loop);
-    };
-    loop();
-    
     return () => {
       window.removeEventListener("resize", measure);
-      cancelAnimationFrame(animationFrameId);
     };
   }, []);
 
@@ -89,21 +80,19 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
           backgroundColor="#FAFBFC"
           onNodeHover={n => setHoveredNode(n?.id || null)}
           linkCurvature={0.25}
-          linkDirectionalParticles={l => l.biased ? 8 : 4}
-          linkDirectionalParticleSpeed={l => l.biased ? 0.008 : 0.004}
+          linkDirectionalParticles={0}
+          linkDirectionalParticleSpeed={0}
           linkDirectionalParticleWidth={4}
           linkDirectionalParticleColor={l => l.biased ? "#EA4335" : "#4285F4"}
+          cooldownTicks={160}
           nodeCanvasObjectMode={() => "replace"}
           nodeCanvasObject={(n, ctx, scale) => {
-            const time = Date.now();
             const isHovered = hoveredNode === n.id;
             
             const size = n.isProtected ? 20 : 15;
             const h = size * 0.5; 
-            
-            const bob = Math.sin(time * 0.0015 + n.x * 0.1) * 6;
             const x = n.x;
-            const y = n.y + bob;
+            const y = n.y;
 
             const colors = n.isProtected ? {
                 light: "#F28B82", medium: "#EA4335", dark: "#C5221F", glow: "rgba(234,67,53,0.5)"
@@ -158,7 +147,6 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
             ctx.stroke();
             
             // Top Face (Light / Glowing)
-            const pulse = (Math.sin(time * 0.003) + 1) / 2;
             ctx.fillStyle = colors.light;
             ctx.beginPath();
             ctx.moveTo(x, y);
@@ -168,7 +156,7 @@ export default function CausalGraph({ edges = [], protected: protectedAttrs = []
             ctx.fill();
             
             // Glowing CPU Core on top
-            ctx.shadowBlur = 8 + pulse * 12;
+            ctx.shadowBlur = 10;
             ctx.shadowColor = colors.medium;
             ctx.fillStyle = "#FFFFFF";
             ctx.beginPath();
