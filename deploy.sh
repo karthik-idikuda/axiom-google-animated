@@ -13,6 +13,14 @@
 #   gcloud config set project gen-lang-client-0976545577
 set -euo pipefail
 
+# FIX: Bypass macOS strict permissions on ~/.config by using local temporary config folders
+export CLOUDSDK_CONFIG="/tmp/axiom-gcloud-config"
+export XDG_CONFIG_HOME="/tmp/axiom-xdg-config"
+export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/axiom-sa-key.json"
+
+# Auto-authenticate with the service account key to bypass login issues
+gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" >/dev/null 2>&1 || true
+
 # always run from the repo root (where this script lives)
 cd "$(dirname "$0")"
 
@@ -57,7 +65,7 @@ deploy_backend() {
     --memory=2Gi --cpu=2 \
     --max-instances=5 --min-instances=0 \
     --port=8080 --timeout=300 \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},GEMINI_MODEL=gemini-2.5-flash,GOOGLE_GENAI_USE_VERTEXAI=False,GOOGLE_API_KEY=${GEMINI_API_KEY},FIREBASE_PROJECT_ID=${PROJECT_ID},FIREBASE_DATABASE_URL=${FIREBASE_DB_URL},AXIOM_DISABLE_FIRESTORE=1,AXIOM_DISABLE_STORAGE=1,CORS_ORIGINS=https://${PROJECT_ID}.web.app,https://${PROJECT_ID}.firebaseapp.com"
+    --set-env-vars="^~^GOOGLE_CLOUD_PROJECT=${PROJECT_ID}~GOOGLE_CLOUD_LOCATION=${REGION}~GEMINI_MODEL=gemini-2.5-flash~GOOGLE_GENAI_USE_VERTEXAI=False~GOOGLE_API_KEY=${GEMINI_API_KEY}~FIREBASE_PROJECT_ID=${PROJECT_ID}~FIREBASE_DATABASE_URL=${FIREBASE_DB_URL}~AXIOM_DISABLE_FIRESTORE=1~AXIOM_DISABLE_STORAGE=1~CORS_ORIGINS=https://${PROJECT_ID}.web.app,https://${PROJECT_ID}.firebaseapp.com"
 
   URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')
   echo "✅ Backend live: $URL"
@@ -78,10 +86,29 @@ deploy_frontend() {
     BACKEND_URL="http://localhost:8000"
   fi
   echo "▶ Building React app with REACT_APP_API_URL=$BACKEND_URL"
-  ( cd frontend && REACT_APP_API_URL="$BACKEND_URL" npm run build )
+  ( cd frontend && REACT_APP_API_URL="$BACKEND_URL" npm install && REACT_APP_API_URL="$BACKEND_URL" npm run build )
 
-  echo "▶ Deploying to Firebase Hosting…"
-  firebase deploy --only hosting --project "$PROJECT_ID"
+  echo "▶ Setting up clean deployment directory to bypass NPM permission and space path bugs..."
+  mkdir -p ~/axiom-deploy/public
+  cp -r frontend/build/* ~/axiom-deploy/public/
+
+  cat << 'EOF' > ~/axiom-deploy/firebase.json
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{"source": "**", "destination": "/index.html"}]
+  }
+}
+EOF
+
+  cd ~/axiom-deploy
+  echo "▶ Installing local Firebase CLI..."
+  npm install firebase-tools
+
+  echo "▶ Deploying to Firebase Hosting..."
+  /opt/homebrew/bin/node ./node_modules/firebase-tools/lib/bin/firebase.js deploy --only hosting --project "$PROJECT_ID"
+  
   echo "✅ Frontend live: https://${PROJECT_ID}.web.app"
 }
 

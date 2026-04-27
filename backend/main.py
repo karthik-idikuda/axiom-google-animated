@@ -29,7 +29,7 @@ log = logging.getLogger("axiom.api")
 app = FastAPI(title="AXIOM", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -141,19 +141,39 @@ async def batch_audit(project_id: str, count: int = 10):
         rows = df.head(count).to_dict(orient="records")
         results = []
         for i, row in enumerate(rows):
+            session_id = f"batch-{project_id}-{i}"
             # Create a decision intercept
             initial: AxiomState = {
-                "session_id": f"batch-{project_id}-{i}",
+                "session_id": session_id,
                 "project_id": project_id,
                 "decision_record": row,
             }
             # Run pipeline asynchronously for speed (or just await them)
             res = await run_axiom_pipeline(initial)
+            
+            # CRITICAL: Save decision to Firebase immediately
+            decision_record = {
+                "session_id": session_id,
+                "timestamp": res.get("timestamp"),
+                "verdict": res.get("verdict"),
+                "severity_score": res.get("severity_score"),
+                "violated_rule_id": res.get("violated_rule_id"),
+                "remediated_decision": res.get("remediated_decision"),
+                "fairness_score_before": res.get("fairness_score_before"),
+                "fairness_score_after": res.get("fairness_score_after"),
+            }
+            try:
+                firebase_service.write_decision(session_id, decision_record)
+            except Exception as e:
+                log.warning("Failed to save batch decision %s: %s", session_id, e)
+            
             results.append({
-                "uuid": initial["session_id"],
+                "uuid": session_id,
                 "verdict": res.get("verdict"),
                 "score": res.get("fairness_score_after") or res.get("fairness_score_before")
             })
+        
+        log.info("Batch audit completed: %d decisions saved to Firebase", len(results))
         return {"project_id": project_id, "processed": len(results), "results": results}
     except Exception as e:
         log.error("Batch audit failed: %s", e)
@@ -163,16 +183,20 @@ async def batch_audit(project_id: str, count: int = 10):
 @app.post("/api/v1/intercept")
 async def intercept(payload: InterceptPayload):
     session_id = payload.session_id or str(uuid.uuid4())
+    decision_record = dict(payload.decision_record or {})
+    # Keep a stable session/report id across the full pipeline.
+    decision_record.setdefault("uuid", session_id)
     initial: AxiomState = {
         "session_id": session_id,
         "project_id": payload.project_id,
-        "decision_record": payload.decision_record,
+        "decision_record": decision_record,
     }
     final = await run_axiom_pipeline(initial)
 
     # Strip non-JSON-safe fields (networkx graph, numpy arrays) for HTTP response
     safe = {
         "session_id": session_id,
+        "timestamp": final.get("timestamp"),
         "pipeline_status": final.get("pipeline_status"),
         "verdict": final.get("verdict"),
         "violated_rule": final.get("violated_rule"),
@@ -195,6 +219,15 @@ async def intercept(payload: InterceptPayload):
         "audit_report": final.get("audit_report"),
         "pdf_url": final.get("pdf_url"),
     }
+    safe = firebase_service._json_safe(safe)
+    
+    # CRITICAL: Save decision to Firebase before returning
+    try:
+        firebase_service.write_decision(session_id, safe)
+        log.info("Decision saved to Firebase: %s", session_id)
+    except Exception as e:
+        log.error("Failed to save decision to Firebase: %s", e)
+    
     return safe
 
 

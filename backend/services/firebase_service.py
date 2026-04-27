@@ -211,7 +211,18 @@ def write_causal_graph(
         "protected_attributes": protected,
     }
     if adjacency_matrix is not None:
-        payload["adjacency_matrix"] = _json_safe(adjacency_matrix)
+        safe_adj = _json_safe(adjacency_matrix)
+        # Firestore rejects nested arrays; store matrix as row objects.
+        if (
+            isinstance(safe_adj, list)
+            and safe_adj
+            and all(isinstance(row, list) for row in safe_adj)
+        ):
+            payload["adjacency_matrix_rows"] = [
+                {"index": i, "values": row} for i, row in enumerate(safe_adj)
+            ]
+        else:
+            payload["adjacency_matrix"] = safe_adj
     if feature_names is not None:
         payload["feature_names"] = feature_names
     if dataset_path is not None:
@@ -224,7 +235,15 @@ def write_causal_graph(
 
 
 def read_causal_graph(project_id: str) -> Optional[dict]:
-    return _fs_get("projects", project_id)
+    doc = _fs_get("projects", project_id)
+    if not doc:
+        return None
+    # Backward-compatible reconstruction for stored matrix row objects.
+    if "adjacency_matrix" not in doc and isinstance(doc.get("adjacency_matrix_rows"), list):
+        rows = doc.get("adjacency_matrix_rows") or []
+        rows_sorted = sorted(rows, key=lambda r: r.get("index", 0))
+        doc["adjacency_matrix"] = [r.get("values", []) for r in rows_sorted]
+    return doc
 
 
 def upload_pdf(filename: str, data: bytes) -> str:

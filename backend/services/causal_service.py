@@ -7,6 +7,7 @@ from typing import Tuple
 import networkx as nx
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 from sklearn.preprocessing import LabelEncoder
 
 log = logging.getLogger("axiom.causal")
@@ -38,7 +39,8 @@ def encode_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
     df = df.copy()
     encoders: dict = {}
     for col in df.columns:
-        if not np.issubdtype(df[col].dtype, np.number):
+        # Handles pandas extension dtypes (e.g. StringDtype) safely.
+        if not is_numeric_dtype(df[col]):
             le = LabelEncoder()
             df[col] = le.fit_transform(df[col].astype(str))
             encoders[col] = le

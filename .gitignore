@@ -11,3 +11,4 @@ dist/
 *.log
 datasets/*.csv
 !datasets/.gitkeep
+reports/*.pdf
